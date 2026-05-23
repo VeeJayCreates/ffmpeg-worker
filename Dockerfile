@@ -6,14 +6,14 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     fonts-dejavu-core \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Download Playfair Display font at build time
+# Use Liberation Serif (comes with fonts-liberation, looks like Times/Playfair)
+# Copy to /fonts so handler.py finds it at the expected path
 RUN mkdir -p /fonts && \
-    wget -q "https://github.com/google/fonts/raw/main/ofl/playfairdisplay/PlayfairDisplay-Bold.ttf" \
-    -O /fonts/PlayfairDisplay-Bold.ttf && \
-    wget -q "https://github.com/google/fonts/raw/main/ofl/playfairdisplay/PlayfairDisplay-Regular.ttf" \
-    -O /fonts/PlayfairDisplay-Regular.ttf
+    cp /usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf /fonts/PlayfairDisplay-Bold.ttf && \
+    cp /usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf /fonts/PlayfairDisplay-Regular.ttf
 
 # Install Python dependencies
 COPY requirements.txt /requirements.txt
