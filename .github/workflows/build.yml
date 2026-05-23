@@ -3,8 +3,6 @@ name: Build FFmpeg Worker
 on:
   push:
     branches: [main]
-    paths:
-      - 'ffmpeg-worker/**'
   workflow_dispatch:
 
 jobs:
@@ -23,7 +21,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          context: ./ffmpeg-worker
+          context: .
           push: true
           tags: |
             ghcr.io/veejaycreates/ffmpeg-worker:latest
