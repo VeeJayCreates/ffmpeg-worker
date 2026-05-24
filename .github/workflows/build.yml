@@ -25,4 +25,4 @@ jobs:
           push: true
           tags: |
             ghcr.io/veejaycreates/ffmpeg-worker:latest
-            ghcr.io/veejaycreates/ffmpeg-worker:v4
+            ghcr.io/veejaycreates/ffmpeg-worker:v6
