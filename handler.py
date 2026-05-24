@@ -21,7 +21,7 @@ FONT_BOLD      = "/fonts/PlayfairDisplay-Bold.ttf"
 FONT_REG       = "/fonts/PlayfairDisplay-Regular.ttf"
 FONT_EMOJI     = "/fonts/NotoColorEmoji.ttf"
 IMG_DURATION   = 2.5    # seconds per image
-TITLE_DURATION = 2.5    # seconds title is visible
+TITLE_DURATION = 3.5    # seconds title is visible
 FADE_DURATION  = 0.5    # fade in/out duration
 
 # Title colors — rotate per session_id
@@ -103,7 +103,7 @@ def build_title_overlay_image(title, color_hex, workdir):
     # No background bar — clean overlay
 
     # Title text
-    font_size = 88
+    font_size = 80
     try:
         font = ImageFont.truetype(FONT_BOLD, font_size)
     except Exception:
@@ -169,7 +169,7 @@ def build_title_overlay_image(title, color_hex, workdir):
         cfl_w = len(cfl_text) * (cfl_font_size // 2)
 
     cfl_x = (OUTPUT_W - cfl_w) // 2
-    cfl_y = OUTPUT_H - 540  # 3x up from bottom
+    cfl_y = OUTPUT_H - 460  # slightly down from 3x
 
     # Black stroke (draw text offset in 8 directions)
     stroke = 3
@@ -293,10 +293,10 @@ def handler(job):
     dt_display = dt_map.get(dress_type, dress_type.capitalize())
     # Smart title formats
     smart_titles = [
-        f"{mp_display} {dt_display} Under 500",
-        f"Best {dt_display} on {mp_display}",
-        f"{mp_display} {dt_display} Worth Buying",
-        f"Affordable {dt_display} Haul",
+        f"{mp_display} {dt_display} Under 500 🌸",
+        f"Best {dt_display} on {mp_display} 🌸",
+        f"{mp_display} {dt_display} Worth Buying 🌸",
+        f"Affordable {dt_display} Haul 🌸",
     ]
     auto_title = smart_titles[int(session_id) % len(smart_titles)].strip()
     # Use provided title if it's meaningful, else use smart auto title
@@ -352,77 +352,78 @@ def handler(job):
         total_dur = sum(d for _, d in motions)
         log(f"Total video duration: {total_dur}s ({n} images × {IMG_DURATION}s)")
 
-        # ── 6. Build FFmpeg inputs ────────────────────────────────────────
-        input_args = []
-        for i, (path, (motion, dur)) in enumerate(zip(prep_paths, motions)):
-            input_args += ["-loop", "1", "-t", str(dur + 0.3), "-i", path]
+        # ── 6. Render each image as individual clip then concat ──────────
+        clip_paths = []
+        for i, (prep, (motion, dur)) in enumerate(zip(prep_paths, motions)):
+            clip_path = os.path.join(workdir, f"clip_{i}.mp4")
+            zp = get_zoompan_filter(motion, dur, 0)  # always index 0 for single input
+            clip_cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "warning",
+                "-loop", "1", "-t", str(dur + 0.5), "-i", prep,
+                "-filter_complex", zp.replace("[0:v]", "[0:v]").replace(f"[v0]", "[vout]"),
+                "-map", "[vout]",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+                "-pix_fmt", "yuv420p", "-r", str(FPS),
+                "-t", str(dur), "-y", clip_path
+            ]
+            run_cmd(clip_cmd, f"clip {i+1}/{n}")
+            clip_paths.append(clip_path)
+            log(f"Clip {i+1} rendered: {clip_path}")
 
-        # Title overlay image input
-        title_idx = n
-        input_args += ["-loop", "1", "-t", str(TITLE_DURATION), "-i", title_overlay_path]
+        # Concat all clips using concat demuxer
+        concat_list = os.path.join(workdir, "concat.txt")
+        with open(concat_list, "w") as f:
+            for cp in clip_paths:
+                f.write(f"file '{cp}'\n")
 
-        # Music input — loop to fill video
-        music_idx = n + 1
-        if music_path:
-            input_args += ["-stream_loop", "-1", "-i", music_path]
+        concat_path = os.path.join(workdir, "concat.mp4")
+        concat_cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "warning",
+            "-f", "concat", "-safe", "0", "-i", concat_list,
+            "-c", "copy", "-y", concat_path
+        ]
+        run_cmd(concat_cmd, "concat clips")
+        log(f"Concat done: {concat_path}")
 
-        # ── 7. Filter complex ─────────────────────────────────────────────
-        filter_parts = []
+        # Overlay title PNG on concat video
+        title_idx = 0
+        title_input = ["-loop", "1", "-t", str(TITLE_DURATION), "-i", title_overlay_path]
 
-        # Ken burns per image
-        for i, (motion, dur) in enumerate(motions):
-            filter_parts.append(get_zoompan_filter(motion, dur, i))
-
-        # Concat all video streams
-        concat_inputs = "".join(f"[v{i}]" for i in range(n))
-        filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=0[vconcat]")
-
-        # Overlay title PNG on top of video for first TITLE_DURATION seconds
-        # with fade in and fade out
+        # Title effect: fade in + slight zoom pulse
         title_filter = (
-            f"[{title_idx}:v]"
+            f"[1:v]"
             f"fade=t=in:st=0:d={FADE_DURATION}:alpha=1,"
-            f"fade=t=out:st={TITLE_DURATION - FADE_DURATION}:d={FADE_DURATION}:alpha=1"
+            f"fade=t=out:st={TITLE_DURATION - FADE_DURATION}:d={FADE_DURATION}:alpha=1,"
+            f"zoompan=z='min(zoom+0.003,1.05)':x='iw/2-(iw/zoom/2)':y=0:d={int(TITLE_DURATION*FPS)}:s={OUTPUT_W}x{OUTPUT_H}:fps={FPS}"
             f"[title_fade];"
-            f"[vconcat][title_fade]overlay=0:0:enable='between(t,0,{TITLE_DURATION})'[vfinal]"
+            f"[0:v][title_fade]overlay=0:0:enable='between(t,0,{TITLE_DURATION})'[vfinal]"
         )
-        filter_parts.append(title_filter)
 
-        filter_complex = "; ".join(filter_parts)
-
-        # ── 8. Output args ────────────────────────────────────────────────
         output_path = os.path.join(workdir, "output.mp4")
-        output_args = [
+        overlay_cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "warning",
+            "-i", concat_path,
+        ] + title_input + [
+            "-filter_complex", title_filter,
             "-map", "[vfinal]",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "22",
-            "-pix_fmt", "yuv420p",
-            "-r", str(FPS),
-            "-t", str(total_dur),  # enforce exact duration
+            "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+            "-pix_fmt", "yuv420p", "-r", str(FPS),
         ]
 
         if music_path:
-            output_args += [
-                "-map", f"{music_idx}:a",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-t", str(total_dur),  # cut audio to video length
-                "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={total_dur - 1}:d=1",
+            overlay_cmd += [
+                "-stream_loop", "-1", "-i", music_path,
+                "-map", "2:a",
+                "-c:a", "aac", "-b:a", "128k",
+                "-t", str(total_dur),
+                "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={total_dur-1}:d=1",
             ]
 
-        output_args += ["-y", output_path]
+        overlay_cmd += ["-t", str(total_dur), "-y", output_path]
 
-        # ── 9. Run FFmpeg ─────────────────────────────────────────────────
-        cmd = (
-            ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
-            + input_args
-            + ["-filter_complex", filter_complex]
-            + output_args
-        )
-
-        log(f"Running FFmpeg render...")
-        run_cmd(cmd, "main render")
+        # ── 9. Run FFmpeg overlay ─────────────────────────────────────────
+        log(f"Running FFmpeg overlay + audio...")
+        run_cmd(overlay_cmd, "overlay render")
 
         file_size = os.path.getsize(output_path)
         log(f"Output: {output_path} ({file_size // 1024 // 1024}MB, {total_dur}s)")
