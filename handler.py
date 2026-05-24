@@ -19,6 +19,7 @@ OUTPUT_H       = 1920
 FPS            = 30
 FONT_BOLD      = "/fonts/PlayfairDisplay-Bold.ttf"
 FONT_REG       = "/fonts/PlayfairDisplay-Regular.ttf"
+FONT_EMOJI     = "/fonts/NotoColorEmoji.ttf"
 IMG_DURATION   = 2.5    # seconds per image
 TITLE_DURATION = 2.5    # seconds title is visible
 FADE_DURATION  = 0.5    # fade in/out duration
@@ -99,10 +100,7 @@ def build_title_overlay_image(title, color_hex, workdir):
     img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # Dark semi-transparent bar at top for readability
-    bar_h = 200
-    bar = Image.new("RGBA", (OUTPUT_W, bar_h), (0, 0, 0, 160))
-    img.paste(bar, (0, 0), bar)
+    # No background bar — clean overlay
 
     # Title text
     font_size = 88
@@ -171,7 +169,7 @@ def build_title_overlay_image(title, color_hex, workdir):
         cfl_w = len(cfl_text) * (cfl_font_size // 2)
 
     cfl_x = (OUTPUT_W - cfl_w) // 2
-    cfl_y = OUTPUT_H - 180  # near bottom
+    cfl_y = OUTPUT_H - 540  # 3x up from bottom
 
     # Black stroke (draw text offset in 8 directions)
     stroke = 3
@@ -183,6 +181,22 @@ def build_title_overlay_image(title, color_hex, workdir):
 
     # Yellow fill
     draw.text((cfl_x, cfl_y), cfl_text, font=cfl_font, fill=(255, 215, 0, 255))
+
+    # Add emoji using Noto Color Emoji font if available
+    emoji_text = "🛍️"
+    try:
+        emoji_font = ImageFont.truetype(FONT_EMOJI, 80)
+        try:
+            e_bbox = draw.textbbox((0, 0), emoji_text, font=emoji_font)
+            e_w = e_bbox[2] - e_bbox[0]
+        except Exception:
+            e_w = 80
+        e_x = (OUTPUT_W - e_w) // 2
+        e_y = y_start + 10  # just below title text
+        draw.text((e_x, e_y), emoji_text, font=emoji_font, fill=(255, 255, 255, 255), embedded_color=True)
+        log("Emoji drawn successfully")
+    except Exception as e:
+        log(f"Emoji skipped: {e}")
 
     path = os.path.join(workdir, "title_overlay.png")
     img.save(path, "PNG")
@@ -260,11 +274,35 @@ def handler(job):
     creator_name = job_input.get("creator_name", "creator")
     music_url    = job_input.get("music_url", "")
 
-    # Auto-generate title: "Meesho Dresses Haul ✨"
-    mp_display = marketplace.capitalize() if marketplace != "other" else ""
-    dt_display = dress_type.capitalize()
-    title = job_input.get("title") or f"{mp_display} {dt_display} Haul ✨".strip()
-    title = title.replace("'", "").replace('"', "")  # remove quotes for FFmpeg safety
+    # Smart title generation
+    mp_display = marketplace.capitalize() if marketplace and marketplace != "other" else ""
+    dt_map = {
+        "dresses":    "Dress Collection",
+        "tops":       "Top Picks",
+        "co-ord sets":"Co-ord Sets",
+        "jeans":      "Jeans Edit",
+        "skirts":     "Skirt Collection",
+        "trousers":   "Trouser Edit",
+        "palazzos":   "Palazzo Collection",
+        "shorts":     "Shorts Edit",
+        "jumpsuit":   "Jumpsuit Collection",
+        "western":    "Western Wear",
+        "jacket":     "Jacket Collection",
+        "other":      "Fashion Haul",
+    }
+    dt_display = dt_map.get(dress_type, dress_type.capitalize())
+    # Smart title formats
+    smart_titles = [
+        f"{mp_display} {dt_display} Under 500",
+        f"Best {dt_display} on {mp_display}",
+        f"{mp_display} {dt_display} Worth Buying",
+        f"Affordable {dt_display} Haul",
+    ]
+    auto_title = smart_titles[int(session_id) % len(smart_titles)].strip()
+    # Use provided title if it's meaningful, else use smart auto title
+    provided = job_input.get("title", "")
+    title = provided if provided and provided not in ["Dresses Haul", "Tops Haul", "other Haul"] else auto_title
+    title = title.replace("'", "").replace('"', "")
 
     # Pick title color based on session_id
     color_hex = TITLE_COLORS[int(session_id) % len(TITLE_COLORS)]
