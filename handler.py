@@ -228,11 +228,15 @@ def get_zoompan_filter(motion, duration, idx):
 
 def upload_to_r2(local_path, r2_key, job_input):
     """Upload file to Cloudflare R2."""
-    endpoint = job_input.get("r2_endpoint") or os.environ.get("R2_ENDPOINT")
-    bucket   = job_input.get("r2_bucket")   or os.environ.get("R2_BUCKET", "grwm-haul")
-    access   = job_input.get("r2_access_key") or os.environ.get("R2_ACCESS_KEY")
-    secret   = job_input.get("r2_secret_key") or os.environ.get("R2_SECRET_KEY")
+    # Always use env vars for credentials (never from job input for security)
+    endpoint = os.environ.get("R2_ENDPOINT")
+    bucket   = os.environ.get("R2_BUCKET", "grwm-haul")
+    access   = os.environ.get("R2_ACCESS_KEY")
+    secret   = os.environ.get("R2_SECRET_KEY")
     pub_url  = os.environ.get("R2_PUBLIC_URL", "https://pub-e8495394a16e4722827186cdcf97b931.r2.dev")
+    
+    log(f"R2 endpoint: {endpoint}")
+    log(f"R2 access key (first 8 chars): {access[:8] if access else 'MISSING'}")
 
     s3 = boto3.client(
         "s3",
