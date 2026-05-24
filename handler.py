@@ -346,7 +346,9 @@ def handler(job):
         motions = []
         for i in range(len(prep_paths)):
             motion, duration = presets[i % len(presets)]
-            motions.append((motion, duration))
+            # First image gets 3.5s, rest get 2.5s
+            dur = 3.5 if i == 0 else IMG_DURATION
+            motions.append((motion, dur))
 
         n = len(prep_paths)
         total_dur = sum(d for _, d in motions)
@@ -385,15 +387,13 @@ def handler(job):
         run_cmd(concat_cmd, "concat clips")
         log(f"Concat done: {concat_path}")
 
-        # Overlay title PNG on concat video
-        # Title effect: fade in + slight zoom pulse
+        # Overlay title PNG on concat video — simple fade in/out
         title_filter = (
             f"[1:v]"
             f"fade=t=in:st=0:d={FADE_DURATION}:alpha=1,"
-            f"fade=t=out:st={TITLE_DURATION - FADE_DURATION}:d={FADE_DURATION}:alpha=1,"
-            f"zoompan=z='min(zoom+0.003,1.05)':x='iw/2-(iw/zoom/2)':y=0:d={int(TITLE_DURATION*FPS)}:s={OUTPUT_W}x{OUTPUT_H}:fps={FPS}"
+            f"fade=t=out:st={TITLE_DURATION - FADE_DURATION}:d={FADE_DURATION}:alpha=1"
             f"[title_fade];"
-            f"[0:v][title_fade]overlay=0:0:enable='between(t,0,{TITLE_DURATION})'[vfinal]"
+            f"[0:v][title_fade]overlay=0:0[vfinal]"
         )
 
         output_path = os.path.join(workdir, "output.mp4")
