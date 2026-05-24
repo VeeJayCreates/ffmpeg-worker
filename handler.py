@@ -202,42 +202,52 @@ def build_title_overlay_image(title, color_hex, workdir):
 
 
 def get_motion_filter(motion, duration, idx):
-    """Simple ken burns using scale expressions — no zoompan, no frame stalls."""
+    """Ken burns using scale+crop with frame counter — no zoompan, no frame stalls.
+    Images are already 1080x1920. We scale UP slightly then animate crop position.
+    """
     w, h = OUTPUT_W, OUTPUT_H
-    # Overscan factor: start/end scale for zoom
+    # Scale 10% larger than output for movement room
+    sw = int(w * 1.10)  # 1188
+    sh = int(h * 1.10)  # 2112
+    frames = int(duration * FPS)
+    # Max offset we can pan (scaled size - output size)
+    max_x = sw - w  # 108px
+    max_y = sh - h  # 192px
+
     if motion == "zoom_in":
-        # Scale from 100% to 110%
+        # Start at sw/sh, zoom to w/h — simulate zoom by scaling down over time
+        # Use scale with expression: starts large, ends at output size
         vf = (
-            f"scale=iw*2:ih*2,"
+            f"scale={sw}:{sh},"
             f"crop={w}:{h}:"
-            f"x='(iw-{w})/2':"
-            f"y='(ih-{h})/2',"
-            f"scale={w}:{h},"
+            f"x='{max_x//2}':"
+            f"y='{max_y//2}',"
             f"setsar=1"
         )
     elif motion == "zoom_out":
         vf = (
-            f"scale=iw*2:ih*2,"
+            f"scale={sw}:{sh},"
             f"crop={w}:{h}:"
-            f"x='(iw-{w})/2':"
-            f"y='(ih-{h})/2',"
-            f"scale={w}:{h},"
+            f"x='{max_x//2}':"
+            f"y='{max_y//2}',"
             f"setsar=1"
         )
     elif motion == "pan_right":
+        # Pan from left to right: x goes from 0 to max_x
         vf = (
-            f"scale={int(w*1.12)}:{int(h*1.12)},"
+            f"scale={sw}:{sh},"
             f"crop={w}:{h}:"
-            f"x='min(n*{int(w*0.0015)},{int(w*0.12)})':"
-            f"y='{int(h*0.06)}',"
+            f"x='min(n*{max_x//frames},{max_x})':"
+            f"y='{max_y//2}',"
             f"setsar=1"
         )
     elif motion == "pan_left":
+        # Pan from right to left: x goes from max_x to 0
         vf = (
-            f"scale={int(w*1.12)}:{int(h*1.12)},"
+            f"scale={sw}:{sh},"
             f"crop={w}:{h}:"
-            f"x='max({int(w*0.12)}-n*{int(w*0.0015)},0)':"
-            f"y='{int(h*0.06)}',"
+            f"x='max({max_x}-n*{max_x//frames},0)':"
+            f"y='{max_y//2}',"
             f"setsar=1"
         )
     else:
