@@ -411,11 +411,14 @@ def handler(job):
         ]
 
         if music_path:
+            overlay_cmd += ["-stream_loop", "-1", "-i", music_path]
+
+        overlay_cmd += ["-map", "[vfinal]"]
+
+        if music_path:
             overlay_cmd += [
-                "-stream_loop", "-1", "-i", music_path,
                 "-map", "2:a",
                 "-c:a", "aac", "-b:a", "128k",
-                "-t", str(total_dur),
                 "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={total_dur-1}:d=1",
             ]
 
