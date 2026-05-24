@@ -133,6 +133,21 @@ def build_title_overlay_image(title, color_hex, workdir):
     if current:
         lines.append(current)
 
+    # Draw decorative stars using main font
+    star_font_size = 40
+    try:
+        star_font = ImageFont.truetype(FONT_BOLD, star_font_size)
+        stars = "* * * * * * * * * * *"
+        try:
+            s_bbox = draw.textbbox((0, 0), stars, font=star_font)
+            s_w = s_bbox[2] - s_bbox[0]
+        except Exception:
+            s_w = OUTPUT_W - 60
+        s_x = (OUTPUT_W - s_w) // 2
+        draw.text((s_x, 20), stars, font=star_font, fill=(255, 255, 255, 200))
+    except Exception:
+        pass
+
     # Draw title near top with padding
     line_h = font_size + 8
     total_h = len(lines) * line_h
@@ -151,7 +166,18 @@ def build_title_overlay_image(title, color_hex, workdir):
         draw.text((x, y_start), line, font=font, fill=color_rgb)
         y_start += line_h
 
-    # "Comment for link" text at bottom — yellow with black stroke
+    # Comment for link is now in a separate PNG (see build_title_overlay_image return)
+
+    # Emoji rendering skipped — not reliably supported by system fonts
+
+    title_path = os.path.join(workdir, "title_overlay.png")
+    img.save(title_path, "PNG")
+    log(f"Title overlay created: {title_path}")
+
+    # Build separate "Comment for link" PNG — full video height, text at bottom
+    comment_img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
+    comment_draw = ImageDraw.Draw(comment_img)
+
     cfl_text = "Comment for link"
     cfl_font_size = 88
     try:
@@ -163,45 +189,29 @@ def build_title_overlay_image(title, color_hex, workdir):
             cfl_font = ImageFont.load_default()
 
     try:
-        cfl_bbox = draw.textbbox((0, 0), cfl_text, font=cfl_font)
+        cfl_bbox = comment_draw.textbbox((0, 0), cfl_text, font=cfl_font)
         cfl_w = cfl_bbox[2] - cfl_bbox[0]
     except Exception:
         cfl_w = len(cfl_text) * (cfl_font_size // 2)
 
     cfl_x = (OUTPUT_W - cfl_w) // 2
-    cfl_y = OUTPUT_H - 460  # slightly down from 3x
+    cfl_y = OUTPUT_H - 460
 
-    # Black stroke (draw text offset in 8 directions)
+    # Black stroke
     stroke = 3
     for dx in range(-stroke, stroke + 1):
         for dy in range(-stroke, stroke + 1):
             if dx == 0 and dy == 0:
                 continue
-            draw.text((cfl_x + dx, cfl_y + dy), cfl_text, font=cfl_font, fill=(0, 0, 0, 255))
-
+            comment_draw.text((cfl_x + dx, cfl_y + dy), cfl_text, font=cfl_font, fill=(0, 0, 0, 255))
     # Yellow fill
-    draw.text((cfl_x, cfl_y), cfl_text, font=cfl_font, fill=(255, 215, 0, 255))
+    comment_draw.text((cfl_x, cfl_y), cfl_text, font=cfl_font, fill=(255, 215, 0, 255))
 
-    # Add emoji using Noto Color Emoji font if available
-    emoji_text = "🛍️"
-    try:
-        emoji_font = ImageFont.truetype(FONT_EMOJI, 80)
-        try:
-            e_bbox = draw.textbbox((0, 0), emoji_text, font=emoji_font)
-            e_w = e_bbox[2] - e_bbox[0]
-        except Exception:
-            e_w = 80
-        e_x = (OUTPUT_W - e_w) // 2
-        e_y = y_start + 10  # just below title text
-        draw.text((e_x, e_y), emoji_text, font=emoji_font, fill=(255, 255, 255, 255), embedded_color=True)
-        log("Emoji drawn successfully")
-    except Exception as e:
-        log(f"Emoji skipped: {e}")
+    comment_path = os.path.join(workdir, "comment_overlay.png")
+    comment_img.save(comment_path, "PNG")
+    log(f"Comment overlay created: {comment_path}")
 
-    path = os.path.join(workdir, "title_overlay.png")
-    img.save(path, "PNG")
-    log(f"Title overlay created: {path}")
-    return path
+    return title_path, comment_path
 
 
 def get_zoompan_filter(motion, duration, idx):
@@ -339,7 +349,7 @@ def handler(job):
                 music_path = None
 
         # ── 4. Build title overlay image ─────────────────────────────────
-        title_overlay_path = build_title_overlay_image(title, color_hex, workdir)
+        title_overlay_path, comment_overlay_path = build_title_overlay_image(title, color_hex, workdir)
 
         # ── 5. Get motion presets ────────────────────────────────────────
         presets = MOTION_PRESETS.get(dress_type, MOTION_PRESETS["other"])
@@ -387,13 +397,15 @@ def handler(job):
         run_cmd(concat_cmd, "concat clips")
         log(f"Concat done: {concat_path}")
 
-        # Overlay title PNG on concat video — simple fade in/out
+        # Two overlays:
+        # [1:v] = comment PNG — shown throughout entire video
+        # [2:v] = title PNG — fades in/out for first TITLE_DURATION seconds
         title_filter = (
-            f"[1:v]"
-            f"fade=t=in:st=0:d={FADE_DURATION}:alpha=1,"
+            f"[0:v][1:v]overlay=0:0[with_comment];"
+            f"[2:v]fade=t=in:st=0:d={FADE_DURATION}:alpha=1,"
             f"fade=t=out:st={TITLE_DURATION - FADE_DURATION}:d={FADE_DURATION}:alpha=1"
             f"[title_fade];"
-            f"[0:v][title_fade]overlay=0:0[vfinal]"
+            f"[with_comment][title_fade]overlay=0:0[vfinal]"
         )
 
         output_path = os.path.join(workdir, "output.mp4")
@@ -402,9 +414,11 @@ def handler(job):
         overlay_cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
         # Input 0: concat video
         overlay_cmd += ["-i", concat_path]
-        # Input 1: title overlay PNG
+        # Input 1: comment overlay PNG (shown throughout)
+        overlay_cmd += ["-loop", "1", "-i", comment_overlay_path]
+        # Input 2: title overlay PNG (shown for TITLE_DURATION only)
         overlay_cmd += ["-loop", "1", "-t", str(TITLE_DURATION), "-i", title_overlay_path]
-        # Input 2: music — -stream_loop BEFORE -i
+        # Input 3: music — -stream_loop BEFORE -i
         if music_path:
             overlay_cmd += ["-stream_loop", "-1", "-i", music_path]
 
@@ -418,7 +432,7 @@ def handler(job):
 
         # Audio output
         if music_path:
-            overlay_cmd += ["-map", "2:a"]
+            overlay_cmd += ["-map", "3:a"]
             overlay_cmd += ["-c:a", "aac", "-b:a", "128k"]
             overlay_cmd += ["-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={total_dur-1}:d=1"]
 
