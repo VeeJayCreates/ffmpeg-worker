@@ -133,10 +133,10 @@ def build_title_overlay_image(title, color_hex, workdir):
     if current:
         lines.append(current)
 
-    # Draw centered in top bar
+    # Draw title near top with padding
     line_h = font_size + 8
     total_h = len(lines) * line_h
-    y_start = (bar_h - total_h) // 2
+    y_start = 40  # fixed top padding
 
     for line in lines:
         try:
