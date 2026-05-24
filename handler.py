@@ -386,9 +386,6 @@ def handler(job):
         log(f"Concat done: {concat_path}")
 
         # Overlay title PNG on concat video
-        title_idx = 0
-        title_input = ["-loop", "1", "-t", str(TITLE_DURATION), "-i", title_overlay_path]
-
         # Title effect: fade in + slight zoom pulse
         title_filter = (
             f"[1:v]"
@@ -400,32 +397,36 @@ def handler(job):
         )
 
         output_path = os.path.join(workdir, "output.mp4")
-        overlay_cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "warning",
-            "-i", concat_path,
-        ] + title_input + [
-            "-filter_complex", title_filter,
-            "-map", "[vfinal]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "22",
-            "-pix_fmt", "yuv420p", "-r", str(FPS),
-        ]
 
+        # Build FFmpeg overlay command — all inputs MUST come before output options
+        overlay_cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
+        # Input 0: concat video
+        overlay_cmd += ["-i", concat_path]
+        # Input 1: title overlay PNG
+        overlay_cmd += ["-loop", "1", "-t", str(TITLE_DURATION), "-i", title_overlay_path]
+        # Input 2: music — -stream_loop BEFORE -i
         if music_path:
             overlay_cmd += ["-stream_loop", "-1", "-i", music_path]
 
-        overlay_cmd += ["-map", "[vfinal]"]
+        # Filter complex
+        overlay_cmd += ["-filter_complex", title_filter]
 
+        # Video output
+        overlay_cmd += ["-map", "[vfinal]"]
+        overlay_cmd += ["-c:v", "libx264", "-preset", "fast", "-crf", "22"]
+        overlay_cmd += ["-pix_fmt", "yuv420p", "-r", str(FPS)]
+
+        # Audio output
         if music_path:
-            overlay_cmd += [
-                "-map", "2:a",
-                "-c:a", "aac", "-b:a", "128k",
-                "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={total_dur-1}:d=1",
-            ]
+            overlay_cmd += ["-map", "2:a"]
+            overlay_cmd += ["-c:a", "aac", "-b:a", "128k"]
+            overlay_cmd += ["-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={total_dur-1}:d=1"]
 
         overlay_cmd += ["-t", str(total_dur), "-y", output_path]
 
         # ── 9. Run FFmpeg overlay ─────────────────────────────────────────
         log(f"Running FFmpeg overlay + audio...")
+        log(f"CMD: {' '.join(str(x) for x in overlay_cmd)}")
         run_cmd(overlay_cmd, "overlay render")
 
         file_size = os.path.getsize(output_path)
