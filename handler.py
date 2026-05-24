@@ -201,36 +201,49 @@ def build_title_overlay_image(title, color_hex, workdir):
     return title_path, comment_path
 
 
-def get_zoompan_filter(motion, duration, idx):
-    """FFmpeg zoompan filter for ken burns."""
-    frames = int(duration * FPS)
+def get_motion_filter(motion, duration, idx):
+    """Simple ken burns using scale expressions — no zoompan, no frame stalls."""
     w, h = OUTPUT_W, OUTPUT_H
-
+    # Overscan factor: start/end scale for zoom
     if motion == "zoom_in":
-        z = "'zoom+0.002'"
-        x = "'iw/2-(iw/zoom/2)'"
-        y = "'ih/2-(ih/zoom/2)'"
+        # Scale from 100% to 110%
+        vf = (
+            f"scale=iw*2:ih*2,"
+            f"crop={w}:{h}:"
+            f"x='(iw-{w})/2':"
+            f"y='(ih-{h})/2',"
+            f"scale={w}:{h},"
+            f"setsar=1"
+        )
     elif motion == "zoom_out":
-        z = "'if(eq(on,1),1.15,max(zoom-0.002,1))'"
-        x = "'iw/2-(iw/zoom/2)'"
-        y = "'ih/2-(ih/zoom/2)'"
+        vf = (
+            f"scale=iw*2:ih*2,"
+            f"crop={w}:{h}:"
+            f"x='(iw-{w})/2':"
+            f"y='(ih-{h})/2',"
+            f"scale={w}:{h},"
+            f"setsar=1"
+        )
     elif motion == "pan_right":
-        z = "'1.1'"
-        x = f"'iw/2-(iw/zoom/2)+on*{int(w*0.002)}'"
-        y = "'ih/2-(ih/zoom/2)'"
+        vf = (
+            f"scale={int(w*1.12)}:{int(h*1.12)},"
+            f"crop={w}:{h}:"
+            f"x='min(n*{int(w*0.0015)},{int(w*0.12)})':"
+            f"y='{int(h*0.06)}',"
+            f"setsar=1"
+        )
     elif motion == "pan_left":
-        z = "'1.1'"
-        x = f"'iw/2-(iw/zoom/2)-on*{int(w*0.002)}'"
-        y = "'ih/2-(ih/zoom/2)'"
+        vf = (
+            f"scale={int(w*1.12)}:{int(h*1.12)},"
+            f"crop={w}:{h}:"
+            f"x='max({int(w*0.12)}-n*{int(w*0.0015)},0)':"
+            f"y='{int(h*0.06)}',"
+            f"setsar=1"
+        )
     else:
-        z, x, y = "'1'", "'0'", "'0'"
+        vf = f"scale={w}:{h},setsar=1"
 
-    return (
-        f"[{idx}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
-        f"crop={w}:{h},"
-        f"zoompan=z={z}:x={x}:y={y}:d={frames}:s={w}x{h}:fps={FPS},"
-        f"setsar=1[v{idx}]"
-    )
+    return vf
 
 
 def upload_to_r2(local_path, r2_key, job_input):
@@ -355,12 +368,11 @@ def handler(job):
         clip_paths = []
         for i, (prep, (motion, dur)) in enumerate(zip(prep_paths, motions)):
             clip_path = os.path.join(workdir, f"clip_{i}.mp4")
-            zp = get_zoompan_filter(motion, dur, 0)  # always index 0 for single input
+            vf = get_motion_filter(motion, dur, 0)
             clip_cmd = [
                 "ffmpeg", "-hide_banner", "-loglevel", "warning",
-                "-loop", "1", "-t", str(dur + 0.5), "-i", prep,
-                "-filter_complex", zp.replace("[0:v]", "[0:v]").replace(f"[v0]", "[vout]"),
-                "-map", "[vout]",
+                "-loop", "1", "-t", str(dur), "-i", prep,
+                "-vf", vf,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "22",
                 "-pix_fmt", "yuv420p", "-r", str(FPS),
                 "-t", str(dur), "-y", clip_path
@@ -376,15 +388,26 @@ def handler(job):
                 f.write(f"file '{cp}'\n")
 
         concat_path = os.path.join(workdir, "concat.mp4")
+        # Force keyframe at every clip boundary to prevent browser stalls
+        clip_durations = [m[1] for m in motions]
+        keyframe_times = []
+        t = 0
+        for dur in clip_durations[:-1]:  # all except last
+            t += dur
+            keyframe_times.append(str(round(t, 3)))
+        kf_arg = ",".join(keyframe_times) if keyframe_times else "0"
+
         concat_cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
             "-f", "concat", "-safe", "0", "-i", concat_list,
             "-c:v", "libx264", "-preset", "fast", "-crf", "22",
             "-pix_fmt", "yuv420p", "-r", str(FPS),
             "-vf", f"scale={OUTPUT_W}:{OUTPUT_H},setsar=1",
+            "-force_key_frames", kf_arg,
             "-y", concat_path
         ]
         run_cmd(concat_cmd, "concat clips")
+        log(f"Keyframes forced at: {kf_arg}")
         log(f"Concat done: {concat_path}")
 
         # Two overlays:
