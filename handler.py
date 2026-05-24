@@ -133,20 +133,7 @@ def build_title_overlay_image(title, color_hex, workdir):
     if current:
         lines.append(current)
 
-    # Draw decorative stars using main font
-    star_font_size = 40
-    try:
-        star_font = ImageFont.truetype(FONT_BOLD, star_font_size)
-        stars = "* * * * * * * * * * *"
-        try:
-            s_bbox = draw.textbbox((0, 0), stars, font=star_font)
-            s_w = s_bbox[2] - s_bbox[0]
-        except Exception:
-            s_w = OUTPUT_W - 60
-        s_x = (OUTPUT_W - s_w) // 2
-        draw.text((s_x, 20), stars, font=star_font, fill=(255, 255, 255, 200))
-    except Exception:
-        pass
+    # No decorative elements above title
 
     # Draw title near top with padding
     line_h = font_size + 8
@@ -392,20 +379,23 @@ def handler(job):
         concat_cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "warning",
             "-f", "concat", "-safe", "0", "-i", concat_list,
-            "-c", "copy", "-y", concat_path
+            "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+            "-pix_fmt", "yuv420p", "-r", str(FPS),
+            "-vf", f"scale={OUTPUT_W}:{OUTPUT_H},setsar=1",
+            "-y", concat_path
         ]
         run_cmd(concat_cmd, "concat clips")
         log(f"Concat done: {concat_path}")
 
         # Two overlays:
         # [1:v] = comment PNG — shown throughout entire video
-        # [2:v] = title PNG — fades in/out for first TITLE_DURATION seconds
+        # [2:v] = title PNG — fades in then hard cut off at TITLE_DURATION
         title_filter = (
             f"[0:v][1:v]overlay=0:0[with_comment];"
             f"[2:v]fade=t=in:st=0:d={FADE_DURATION}:alpha=1,"
             f"fade=t=out:st={TITLE_DURATION - FADE_DURATION}:d={FADE_DURATION}:alpha=1"
             f"[title_fade];"
-            f"[with_comment][title_fade]overlay=0:0[vfinal]"
+            f"[with_comment][title_fade]overlay=0:0:enable='lte(t,{TITLE_DURATION})'[vfinal]"
         )
 
         output_path = os.path.join(workdir, "output.mp4")
