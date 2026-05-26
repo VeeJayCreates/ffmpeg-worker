@@ -96,7 +96,7 @@ def hex_to_rgb(hex_color):
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
 
-def build_title_overlay_image(title, color_hex, workdir):
+def build_title_overlay_image(title, color_hex, workdir, platform="instagram"):
     """Build a transparent PNG with just the title text — overlaid on video."""
     img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
