@@ -14,6 +14,7 @@ import boto3
 from PIL import Image, ImageDraw, ImageFont
 
 # ── Constants ────────────────────────────────────────────────────────────────
+R2_MUSIC_PREFIX = "music/modern/"  # folder in R2 bucket to scan for music
 OUTPUT_W       = 1080
 OUTPUT_H       = 1920
 FPS            = 30
@@ -25,7 +26,7 @@ TITLE_DURATION = 3.5    # seconds title is visible
 FADE_DURATION  = 0.5    # fade in/out duration
 
 # Title colors — rotate per session_id
-TITLE_COLORS = ["#FFD700", "#FF69B4", "#FF4444", "#C41E3A", "#FF6B35", "#FF1493"]
+TITLE_COLORS = ["#FFD700", "#FFFFFF", "#FF69B4", "#FF4444", "#00E5FF", "#C41E3A", "#FF6B35", "#FF1493"]
 
 # Motion preset — slow subtle zoom only for all dress types
 MOTION_PRESETS = {
@@ -165,7 +166,7 @@ def build_title_overlay_image(title, color_hex, workdir):
     comment_img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
     comment_draw = ImageDraw.Draw(comment_img)
 
-    cfl_text = 'Comment "Link" for the Links'
+    cfl_text = "Comment for links" if platform == "instagram" else "Links in description"
     cfl_font_size = 88
     try:
         cfl_font = ImageFont.truetype(FONT_BOLD, cfl_font_size)
@@ -254,6 +255,42 @@ def get_motion_filter(motion, duration, idx):
     return vf
 
 
+def list_music_from_r2():
+    """List all mp3 files from R2 music folder dynamically."""
+    try:
+        endpoint = os.environ.get("R2_ENDPOINT")
+        bucket   = os.environ.get("R2_BUCKET", "grwm-haul")
+        access   = os.environ.get("R2_ACCESS_KEY")
+        secret   = os.environ.get("R2_SECRET_KEY")
+        pub_url  = os.environ.get("R2_PUBLIC_URL", "https://pub-e8495394a16e4722827186cdcf97b931.r2.dev")
+
+        s3 = boto3.client("s3", endpoint_url=endpoint,
+            aws_access_key_id=access, aws_secret_access_key=secret, region_name="auto")
+
+        response = s3.list_objects_v2(Bucket=bucket, Prefix=R2_MUSIC_PREFIX)
+        tracks = []
+        for obj in response.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith(".mp3"):
+                tracks.append(f"{pub_url}/{key}")
+
+        if tracks:
+            log(f"Found {len(tracks)} music tracks in R2")
+            return tracks
+        else:
+            log("No music tracks found in R2, using fallback")
+            return [
+                f"{pub_url}/music/modern/audio-1.mp3",
+                f"{pub_url}/music/modern/audio-2.mp3",
+            ]
+    except Exception as e:
+        log(f"Music listing failed: {e}, using fallback")
+        return [
+            "https://pub-e8495394a16e4722827186cdcf97b931.r2.dev/music/modern/audio-1.mp3",
+            "https://pub-e8495394a16e4722827186cdcf97b931.r2.dev/music/modern/audio-2.mp3",
+        ]
+
+
 def upload_to_r2(local_path, r2_key, job_input):
     endpoint = os.environ.get("R2_ENDPOINT")
     bucket   = os.environ.get("R2_BUCKET", "grwm-haul")
@@ -283,23 +320,25 @@ def upload_to_r2(local_path, r2_key, job_input):
     return public_url
 
 
-def generate_thumbnail(first_image_path, title_overlay_path, comment_overlay_path, workdir):
-    """Composite title + comment overlays on first VTON image → thumbnail JPEG."""
+def generate_thumbnail(first_image_path, title_overlay_path, workdir, platform="instagram"):
+    """Generate thumbnail based on platform:
+    - instagram: first image + title overlay only (no comment text)
+    - youtube: first image only, completely clean
+    """
     try:
-        # Open first image
         bg = Image.open(first_image_path).convert("RGBA")
         bg = bg.resize((OUTPUT_W, OUTPUT_H), Image.LANCZOS)
 
-        # Composite comment overlay (always visible)
-        comment = Image.open(comment_overlay_path).convert("RGBA")
-        bg = Image.alpha_composite(bg, comment)
+        if platform == "instagram":
+            # Instagram: title overlay only
+            title_img = Image.open(title_overlay_path).convert("RGBA")
+            bg = Image.alpha_composite(bg, title_img)
+            log("Instagram thumbnail: title overlay applied")
+        else:
+            # YouTube: completely clean, no overlays
+            log("YouTube thumbnail: clean image, no overlays")
 
-        # Composite title overlay
-        title = Image.open(title_overlay_path).convert("RGBA")
-        bg = Image.alpha_composite(bg, title)
-
-        # Save as JPEG
-        thumb_path = os.path.join(workdir, "thumbnail.jpg")
+        thumb_path = os.path.join(workdir, f"thumbnail_{platform}.jpg")
         bg.convert("RGB").save(thumb_path, "JPEG", quality=92)
         log(f"Thumbnail created: {thumb_path}")
         return thumb_path
@@ -316,7 +355,11 @@ def handler(job):
     dress_type   = job_input.get("dress_type", "other")
     session_id   = job_input.get("session_id", int(time.time()))
     creator_name = job_input.get("creator_name", "creator")
-    music_url    = job_input.get("music_url", "")
+    # Dynamic music: pick random track from R2 folder
+    music_tracks = list_music_from_r2()
+    import random
+    music_url = random.choice(music_tracks)
+    log(f"Selected music: {music_url}")
 
     # Smart title generation
     mp_display = marketplace.capitalize() if marketplace and marketplace != "other" else ""
@@ -383,7 +426,8 @@ def handler(job):
                 music_path = None
 
         # ── 4. Build title overlay image ─────────────────────────────────
-        title_overlay_path, comment_overlay_path = build_title_overlay_image(title, color_hex, workdir)
+        platform = job_input.get("platform", "instagram")
+        title_overlay_path, comment_overlay_path = build_title_overlay_image(title, color_hex, workdir, platform)
 
         # ── 5. Get motion presets ────────────────────────────────────────
         presets = MOTION_PRESETS.get(dress_type, MOTION_PRESETS["other"])
@@ -494,18 +538,19 @@ def handler(job):
         log(f"Output: {output_path} ({file_size // 1024 // 1024}MB, {total_dur}s)")
 
         # ── 10. Generate thumbnail ────────────────────────────────────────
-        thumb_path = generate_thumbnail(prep_paths[0], title_overlay_path, comment_overlay_path, workdir)
+        thumb_path = generate_thumbnail(prep_paths[0], title_overlay_path, workdir, platform)
 
         # ── 11. Upload to R2 ──────────────────────────────────────────────
         ts = int(time.time())
-        r2_key = f"videos/{creator_name}/session_{session_id}_{ts}.mp4"
-        video_url = upload_to_r2(output_path, r2_key, job_input)
+        plat = platform  # "instagram" or "youtube"
+        video_key = f"videos/{creator_name}/{plat}/session_{session_id}_{ts}.mp4"
+        video_url = upload_to_r2(output_path, video_key, job_input)
 
         # Upload thumbnail
         thumb_url = None
         if thumb_path:
             try:
-                thumb_key = f"thumbnails/{creator_name}/session_{session_id}_{ts}.jpg"
+                thumb_key = f"thumbnails/{creator_name}/{plat}/session_{session_id}_{ts}.jpg"
                 thumb_url = upload_to_r2(thumb_path, thumb_key, job_input)
                 log(f"Thumbnail uploaded: {thumb_url}")
             except Exception as e:
@@ -513,6 +558,7 @@ def handler(job):
 
         return {
             "success": True,
+            "platform": plat,
             "video_url": video_url,
             "thumbnail_url": thumb_url,
             "session_id": session_id,
