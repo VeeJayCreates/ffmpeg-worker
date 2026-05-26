@@ -27,20 +27,20 @@ FADE_DURATION  = 0.5    # fade in/out duration
 # Title colors — rotate per session_id
 TITLE_COLORS = ["#FFD700", "#FF69B4", "#FF4444", "#C41E3A", "#FF6B35", "#FF1493"]
 
-# Ken burns motion presets per dress type — all 2.5s
+# Motion preset — slow subtle zoom only for all dress types
 MOTION_PRESETS = {
-    "dresses":    [("zoom_in", IMG_DURATION), ("pan_right", IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_left", IMG_DURATION)],
-    "tops":       [("zoom_in", IMG_DURATION), ("pan_left",  IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_right", IMG_DURATION)],
-    "co-ord sets":[("pan_right",IMG_DURATION), ("zoom_in",  IMG_DURATION), ("pan_left", IMG_DURATION), ("zoom_out", IMG_DURATION)],
-    "jeans":      [("zoom_in", IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_right", IMG_DURATION), ("pan_left", IMG_DURATION)],
-    "skirts":     [("pan_left", IMG_DURATION), ("zoom_in",  IMG_DURATION), ("pan_right", IMG_DURATION), ("zoom_out", IMG_DURATION)],
-    "trousers":   [("zoom_in", IMG_DURATION), ("pan_left",  IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_right", IMG_DURATION)],
-    "palazzos":   [("pan_right",IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_left", IMG_DURATION), ("zoom_in",  IMG_DURATION)],
-    "shorts":     [("zoom_in", IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_right", IMG_DURATION), ("pan_left", IMG_DURATION)],
-    "jumpsuit":   [("zoom_in", IMG_DURATION), ("pan_right", IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_left", IMG_DURATION)],
-    "western":    [("pan_left", IMG_DURATION), ("zoom_in",  IMG_DURATION), ("pan_right", IMG_DURATION), ("zoom_out", IMG_DURATION)],
-    "jacket":     [("zoom_in", IMG_DURATION), ("pan_left",  IMG_DURATION), ("zoom_out", IMG_DURATION), ("pan_right", IMG_DURATION)],
-    "other":      [("zoom_in", IMG_DURATION), ("zoom_out",  IMG_DURATION), ("pan_right", IMG_DURATION), ("pan_left", IMG_DURATION)],
+    "dresses":    [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "tops":       [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "co-ord sets":[("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "jeans":      [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "skirts":     [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "trousers":   [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "palazzos":   [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "shorts":     [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "jumpsuit":   [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "western":    [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "jacket":     [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
+    "other":      [("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION), ("zoom_in", IMG_DURATION)],
 }
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ def build_title_overlay_image(title, color_hex, workdir):
     # No background bar — clean overlay
 
     # Title text
-    font_size = 80
+    font_size = 68
     try:
         font = ImageFont.truetype(FONT_BOLD, font_size)
     except Exception:
@@ -165,7 +165,7 @@ def build_title_overlay_image(title, color_hex, workdir):
     comment_img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
     comment_draw = ImageDraw.Draw(comment_img)
 
-    cfl_text = "Comment for link"
+    cfl_text = 'Comment "Link" for the Links'
     cfl_font_size = 88
     try:
         cfl_font = ImageFont.truetype(FONT_BOLD, cfl_font_size)
@@ -206,30 +206,28 @@ def get_motion_filter(motion, duration, idx):
     Images are already 1080x1920. We scale UP slightly then animate crop position.
     """
     w, h = OUTPUT_W, OUTPUT_H
-    # Scale 10% larger than output for movement room
-    sw = int(w * 1.10)  # 1188
-    sh = int(h * 1.10)  # 2112
+    # Scale only 4% larger — very subtle zoom
+    sw = int(w * 1.04)  # 1123
+    sh = int(h * 1.04)  # 1996
     frames = int(duration * FPS)
-    # Max offset we can pan (scaled size - output size)
-    max_x = sw - w  # 108px
-    max_y = sh - h  # 192px
+    max_x = sw - w  # 43px
+    max_y = sh - h  # 76px
 
     if motion == "zoom_in":
-        # Start at sw/sh, zoom to w/h — simulate zoom by scaling down over time
-        # Use scale with expression: starts large, ends at output size
+        # Gradually crop from outer edge inward (simulates slow zoom in)
         vf = (
             f"scale={sw}:{sh},"
             f"crop={w}:{h}:"
-            f"x='{max_x//2}':"
-            f"y='{max_y//2}',"
+            f"x='({max_x}-n*{max(1, max_x//frames)})':"
+            f"y='({max_y}-n*{max(1, max_y//frames)})',"
             f"setsar=1"
         )
     elif motion == "zoom_out":
         vf = (
             f"scale={sw}:{sh},"
             f"crop={w}:{h}:"
-            f"x='{max_x//2}':"
-            f"y='{max_y//2}',"
+            f"x='min(n*{max(1, max_x//frames)},{max_x})':"
+            f"y='min(n*{max(1, max_y//frames)},{max_y})',"
             f"setsar=1"
         )
     elif motion == "pan_right":
@@ -278,10 +276,36 @@ def upload_to_r2(local_path, r2_key, job_input):
     )
 
     log(f"Uploading {local_path} → {bucket}/{r2_key}")
-    s3.upload_file(local_path, bucket, r2_key, ExtraArgs={"ContentType": "video/mp4"})
+    content_type = "image/jpeg" if r2_key.endswith(".jpg") else "video/mp4"
+    s3.upload_file(local_path, bucket, r2_key, ExtraArgs={"ContentType": content_type})
     public_url = f"{pub_url}/{r2_key}"
     log(f"Uploaded → {public_url}")
     return public_url
+
+
+def generate_thumbnail(first_image_path, title_overlay_path, comment_overlay_path, workdir):
+    """Composite title + comment overlays on first VTON image → thumbnail JPEG."""
+    try:
+        # Open first image
+        bg = Image.open(first_image_path).convert("RGBA")
+        bg = bg.resize((OUTPUT_W, OUTPUT_H), Image.LANCZOS)
+
+        # Composite comment overlay (always visible)
+        comment = Image.open(comment_overlay_path).convert("RGBA")
+        bg = Image.alpha_composite(bg, comment)
+
+        # Composite title overlay
+        title = Image.open(title_overlay_path).convert("RGBA")
+        bg = Image.alpha_composite(bg, title)
+
+        # Save as JPEG
+        thumb_path = os.path.join(workdir, "thumbnail.jpg")
+        bg.convert("RGB").save(thumb_path, "JPEG", quality=92)
+        log(f"Thumbnail created: {thumb_path}")
+        return thumb_path
+    except Exception as e:
+        log(f"Thumbnail generation failed: {e}")
+        return None
 
 
 # ── Main handler ─────────────────────────────────────────────────────────────
@@ -313,10 +337,10 @@ def handler(job):
     dt_display = dt_map.get(dress_type, dress_type.capitalize())
     # Smart title formats
     smart_titles = [
-        f"{mp_display} {dt_display} Under 500 🌸",
-        f"Best {dt_display} on {mp_display} 🌸",
-        f"{mp_display} {dt_display} Worth Buying 🌸",
-        f"Affordable {dt_display} Haul 🌸",
+        f"{mp_display} {dt_display} Under 500",
+        f"Best {dt_display} on {mp_display}",
+        f"{mp_display} {dt_display} Worth Buying",
+        f"Affordable {dt_display} Haul",
     ]
     auto_title = smart_titles[int(session_id) % len(smart_titles)].strip()
     # Use provided title if it's meaningful, else use smart auto title
@@ -469,13 +493,28 @@ def handler(job):
         file_size = os.path.getsize(output_path)
         log(f"Output: {output_path} ({file_size // 1024 // 1024}MB, {total_dur}s)")
 
-        # ── 10. Upload to R2 ──────────────────────────────────────────────
-        r2_key = f"videos/{creator_name}/session_{session_id}_{int(time.time())}.mp4"
+        # ── 10. Generate thumbnail ────────────────────────────────────────
+        thumb_path = generate_thumbnail(prep_paths[0], title_overlay_path, comment_overlay_path, workdir)
+
+        # ── 11. Upload to R2 ──────────────────────────────────────────────
+        ts = int(time.time())
+        r2_key = f"videos/{creator_name}/session_{session_id}_{ts}.mp4"
         video_url = upload_to_r2(output_path, r2_key, job_input)
+
+        # Upload thumbnail
+        thumb_url = None
+        if thumb_path:
+            try:
+                thumb_key = f"thumbnails/{creator_name}/session_{session_id}_{ts}.jpg"
+                thumb_url = upload_to_r2(thumb_path, thumb_key, job_input)
+                log(f"Thumbnail uploaded: {thumb_url}")
+            except Exception as e:
+                log(f"Thumbnail upload failed: {e}")
 
         return {
             "success": True,
             "video_url": video_url,
+            "thumbnail_url": thumb_url,
             "session_id": session_id,
             "duration_seconds": round(total_dur, 1),
             "image_count": n,
