@@ -26,7 +26,13 @@ TITLE_DURATION = 3.5    # seconds title is visible
 FADE_DURATION  = 0.5    # fade in/out duration
 
 # Title colors — rotate per session_id
-TITLE_COLORS = ["#FFD700", "#FFFFFF", "#FF69B4", "#FF4444", "#00E5FF", "#C41E3A", "#FF6B35", "#FF1493"]
+# Gradient definitions: (color1, color2, stroke_color)
+TITLE_GRADIENTS = [
+    ("#FF6B6B", "#FF3CAC", "#7B0000"),   # 3. Coral Sunset
+    ("#00F5A0", "#00D9F5", "#004D40"),   # 4. Mint Fresh
+    ("#9B59B6", "#2980B9", "#1A0533"),   # 5. Royal Purple
+    ("#FF9933", "#FF3333", "#4A1000"),   # 6. Saffron Desi
+]
 
 # Motion preset — slow subtle zoom only for all dress types
 MOTION_PRESETS = {
@@ -96,67 +102,80 @@ def hex_to_rgb(hex_color):
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
 
-def build_title_overlay_image(title, color_hex, workdir, platform="instagram"):
+def build_title_overlay_image(title, dress_type, gradient, workdir, platform="instagram"):
     """Build a transparent PNG with just the title text — overlaid on video."""
     img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # No background bar — clean overlay
+    # ── Draw large dress_type word with gradient + stroke ──────────────
+    hero_word = dress_type.upper() if dress_type else "STYLE"
+    color1, color2, stroke_color = gradient
 
-    # Title text
-    font_size = 68
+    hero_size = 140
     try:
-        font = ImageFont.truetype(FONT_BOLD, font_size)
+        hero_font = ImageFont.truetype(FONT_BOLD, hero_size)
     except Exception:
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf", font_size)
-        except Exception:
-            font = ImageFont.load_default()
+        hero_font = ImageFont.load_default()
 
-    color_rgb = hex_to_rgb(color_hex) + (255,)
-    shadow_rgb = (0, 0, 0, 200)
+    try:
+        hb = draw.textbbox((0, 0), hero_word, font=hero_font)
+        hw = hb[2] - hb[0]
+        hh = hb[3] - hb[1]
+    except Exception:
+        hw, hh = hero_size * len(hero_word) // 2, hero_size
 
-    # Word wrap
-    words = title.split()
-    lines, current = [], ""
-    for word in words:
-        test = (current + " " + word).strip()
-        try:
-            bbox = draw.textbbox((0, 0), test, font=font)
-            if bbox[2] > OUTPUT_W - 60:
-                if current:
-                    lines.append(current)
-                current = word
-            else:
-                current = test
-        except Exception:
-            current = test
-    if current:
-        lines.append(current)
+    hx = (OUTPUT_W - hw) // 2
+    hy = 30
 
-    # No decorative elements above title
+    # Stroke
+    stroke_rgb = tuple(int(stroke_color[i:i+2], 16) for i in (1, 3, 5)) + (255,)
+    for dx in range(-5, 6, 2):
+        for dy in range(-5, 6, 2):
+            if dx == 0 and dy == 0:
+                continue
+            draw.text((hx + dx, hy + dy), hero_word, font=hero_font, fill=stroke_rgb)
 
-    # Draw title near top with padding
-    line_h = font_size + 8
-    total_h = len(lines) * line_h
-    y_start = 40  # fixed top padding
+    # Gradient simulation — top half color1, bottom half color2
+    c1_rgb = tuple(int(color1[i:i+2], 16) for i in (1, 3, 5)) + (255,)
+    c2_rgb = tuple(int(color2[i:i+2], 16) for i in (1, 3, 5)) + (255,)
 
-    for line in lines:
-        try:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            tw = bbox[2] - bbox[0]
-        except Exception:
-            tw = len(line) * (font_size // 2)
-        x = (OUTPUT_W - tw) // 2
-        # Shadow
-        draw.text((x + 2, y_start + 2), line, font=font, fill=shadow_rgb)
-        # Colored text
-        draw.text((x, y_start), line, font=font, fill=color_rgb)
-        y_start += line_h
+    # Draw on a separate layer then crop into two halves
+    top_layer = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
+    bot_layer = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
+    ImageDraw.Draw(top_layer).text((hx, hy), hero_word, font=hero_font, fill=c1_rgb)
+    ImageDraw.Draw(bot_layer).text((hx, hy), hero_word, font=hero_font, fill=c2_rgb)
 
-    # Comment for link is now in a separate PNG (see build_title_overlay_image return)
+    # Mask: top half shows color1, bottom half shows color2
+    mask_top = Image.new("L", (OUTPUT_W, OUTPUT_H), 0)
+    mask_top.paste(255, (0, 0, OUTPUT_W, hy + hh // 2))
+    mask_bot = Image.new("L", (OUTPUT_W, OUTPUT_H), 0)
+    mask_bot.paste(255, (0, hy + hh // 2, OUTPUT_W, hy + hh + 10))
 
-    # Emoji rendering skipped — not reliably supported by system fonts
+    img.paste(top_layer, mask=mask_top)
+    img.paste(bot_layer, mask=mask_bot)
+    draw = ImageDraw.Draw(img)  # redraw after paste
+
+    # ── Draw subtitle — small, single line ──────────────────────────────────
+    sub_y = hy + hh + 14
+    sub_size = 42
+    sub_text = title.replace("👗", "").replace("🌸", "").strip()
+    try:
+        sub_font = ImageFont.truetype(FONT_BOLD, sub_size)
+        sb = draw.textbbox((0, 0), sub_text, font=sub_font)
+        sw = sb[2] - sb[0]
+        while sw > OUTPUT_W - 40 and sub_size > 26:
+            sub_size -= 2
+            sub_font = ImageFont.truetype(FONT_BOLD, sub_size)
+            sb = draw.textbbox((0, 0), sub_text, font=sub_font)
+            sw = sb[2] - sb[0]
+    except Exception:
+        sub_font = ImageFont.load_default()
+        sw = len(sub_text) * 10
+
+    sx = (OUTPUT_W - sw) // 2
+    draw.text((sx + 1, sub_y + 1), sub_text, font=sub_font, fill=(0, 0, 0, 200))
+    draw.text((sx, sub_y), sub_text, font=sub_font, fill=(255, 255, 255, 240))
+
 
     title_path = os.path.join(workdir, "title_overlay.png")
     img.save(title_path, "PNG")
@@ -392,12 +411,12 @@ def handler(job):
     title = title.replace("'", "").replace('"', "")
 
     # Pick title color based on session_id
-    color_hex = TITLE_COLORS[int(session_id) % len(TITLE_COLORS)]
+    gradient = TITLE_GRADIENTS[int(session_id) % len(TITLE_GRADIENTS)]
 
     if not image_urls:
         return {"error": "No image_urls provided"}
 
-    log(f"Job start — {len(image_urls)} images, title: '{title}', color: {color_hex}")
+    log(f"Job start — {len(image_urls)} images, title: '{title}', gradient: {gradient[0]}")
 
     workdir = tempfile.mkdtemp(prefix="grwm_")
     try:
@@ -427,7 +446,7 @@ def handler(job):
 
         # ── 4. Build title overlay image ─────────────────────────────────
         platform = job_input.get("platform", "instagram")
-        title_overlay_path, comment_overlay_path = build_title_overlay_image(title, color_hex, workdir, platform)
+        title_overlay_path, comment_overlay_path = build_title_overlay_image(title, dress_type, gradient, workdir, platform)
 
         # ── 5. Get motion presets ────────────────────────────────────────
         presets = MOTION_PRESETS.get(dress_type, MOTION_PRESETS["other"])
@@ -538,7 +557,7 @@ def handler(job):
         log(f"Output: {output_path} ({file_size // 1024 // 1024}MB, {total_dur}s)")
 
         # ── 10. Generate thumbnail ────────────────────────────────────────
-        thumb_path = generate_thumbnail(prep_paths[0], title_overlay_path, workdir, platform)
+        thumb_path = generate_thumbnail(prep_paths[0], title_overlay_path, workdir)
 
         # ── 11. Upload to R2 ──────────────────────────────────────────────
         ts = int(time.time())
