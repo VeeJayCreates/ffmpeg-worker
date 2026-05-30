@@ -161,18 +161,22 @@ def build_title_overlay_image(title, dress_type, gradient, workdir, platform="in
 
     draw = ImageDraw.Draw(img)  # refresh draw after paste
 
-    # ── Subtitle: IG title small, single line, below hero word ──────────────
-    # Use ig_title (passed as title param) — shorter and punchier than yt_title
-    sub_y = hy + hh + 12
+    # ── Subtitle: IG title small, single line, BELOW hero word ────────────────
     sub_text = title.replace("👗", "").replace("🌸", "").replace("✨", "").strip()
-    sub_size = 38
+    sub_size = 36
+
+    # hero_size is 130, typical hh for Liberation Serif is ~100-120px
+    # Use fixed offset from hy to ensure subtitle is always below
+    sub_y = hy + hero_size + 10  # always below regardless of textbbox hh
+
+    log(f"Hero y={hy}, hero_size={hero_size}, hh={hh}, sub_y={sub_y}")
 
     try:
         sub_font = ImageFont.truetype(FONT_BOLD, sub_size)
         sb = draw.textbbox((0, 0), sub_text, font=sub_font)
         sw = sb[2] - sb[0]
         # Shrink font until it fits in one line
-        while sw > OUTPUT_W - 30 and sub_size > 22:
+        while sw > OUTPUT_W - 20 and sub_size > 20:
             sub_size -= 2
             sub_font = ImageFont.truetype(FONT_BOLD, sub_size)
             sb = draw.textbbox((0, 0), sub_text, font=sub_font)
@@ -181,7 +185,8 @@ def build_title_overlay_image(title, dress_type, gradient, workdir, platform="in
         sub_font = ImageFont.load_default()
         sw = len(sub_text) * 10
 
-    sx = (OUTPUT_W - sw) // 2
+    sx = max(10, (OUTPUT_W - sw) // 2)
+    log(f"Subtitle: sw={sw}, sx={sx}, sub_y={sub_y}, font_size={sub_size}")
     # Shadow
     draw.text((sx + 1, sub_y + 1), sub_text, font=sub_font, fill=(0, 0, 0, 220))
     # White text
