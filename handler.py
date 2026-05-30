@@ -127,39 +127,45 @@ def build_title_overlay_image(title, dress_type, gradient, workdir, platform="in
     hx = (OUTPUT_W - hw) // 2
     hy = 24
 
-    # 1. Draw stroke first (offset in 8 directions)
-    stroke_rgb = tuple(int(stroke_color[i:i+2], 16) for i in (1, 3, 5)) + (255,)
-    for dx in range(-4, 5, 2):
-        for dy in range(-4, 5, 2):
-            if dx == 0 and dy == 0:
-                continue
-            draw.text((hx + dx, hy + dy), hero_word, font=hero_font, fill=stroke_rgb)
-
-    # 2. True gradient: render on separate layer with gradient mask
+    # 1. True gradient text — left to right, clean, no stroke artifact
     c1 = tuple(int(color1[i:i+2], 16) for i in (1, 3, 5))
     c2 = tuple(int(color2[i:i+2], 16) for i in (1, 3, 5))
 
-    # Create gradient image same size as hero text bounding box
-    grad_img = Image.new("RGBA", (hw + 20, hh + 20), (0, 0, 0, 0))
-    grad_draw = ImageDraw.Draw(grad_img)
+    # Padding around text for stroke
+    pad = 8
+    box_w = hw + pad * 2
+    box_h = hero_size + pad * 2
 
-    # Draw gradient line by line (left to right)
-    for x in range(hw + 20):
-        ratio = x / (hw + 20)
+    # Create stroke layer — draw text offset in all directions
+    stroke_layer = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+    stroke_draw = ImageDraw.Draw(stroke_layer)
+    stroke_rgb = tuple(int(stroke_color[i:i+2], 16) for i in (1, 3, 5)) + (255,)
+    for dx in range(-3, 4):
+        for dy in range(-3, 4):
+            if dx == 0 and dy == 0:
+                continue
+            stroke_draw.text((pad + dx, pad + dy), hero_word, font=hero_font, fill=stroke_rgb)
+    img.paste(stroke_layer, (hx - pad, hy - pad), stroke_layer)
+
+    # Create gradient fill layer
+    grad_layer = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+    grad_draw = ImageDraw.Draw(grad_layer)
+
+    # Fill with left-to-right gradient
+    for x in range(box_w):
+        ratio = x / box_w
         r = int(c1[0] + (c2[0] - c1[0]) * ratio)
         g = int(c1[1] + (c2[1] - c1[1]) * ratio)
         b = int(c1[2] + (c2[2] - c1[2]) * ratio)
-        grad_draw.line([(x, 0), (x, hh + 20)], fill=(r, g, b, 255))
+        grad_draw.line([(x, 0), (x, box_h)], fill=(r, g, b, 255))
 
-    # Create text mask — white where text is
-    text_mask = Image.new("L", (hw + 20, hh + 20), 0)
-    ImageDraw.Draw(text_mask).text((10, 5), hero_word, font=hero_font, fill=255)
+    # Text mask — only show gradient where text pixels are
+    text_mask = Image.new("L", (box_w, box_h), 0)
+    ImageDraw.Draw(text_mask).text((pad, pad), hero_word, font=hero_font, fill=255)
+    grad_layer.putalpha(text_mask)
 
-    # Apply gradient through text mask
-    grad_img.putalpha(text_mask)
-    img.paste(grad_img, (hx - 10, hy - 5), grad_img)
-
-    draw = ImageDraw.Draw(img)  # refresh draw after paste
+    img.paste(grad_layer, (hx - pad, hy - pad), grad_layer)
+    draw = ImageDraw.Draw(img)
 
     # ── Subtitle: IG title small, single line, BELOW hero word ────────────────
     sub_text = title.replace("👗", "").replace("🌸", "").replace("✨", "").strip()
