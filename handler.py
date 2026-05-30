@@ -107,11 +107,11 @@ def build_title_overlay_image(title, dress_type, gradient, workdir, platform="in
     img = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # ── Draw large dress_type word with gradient + stroke ──────────────
+    # ── Hero word: large, gradient left→right, stroke border ────────────────
     hero_word = dress_type.upper() if dress_type else "STYLE"
     color1, color2, stroke_color = gradient
 
-    hero_size = 140
+    hero_size = 130
     try:
         hero_font = ImageFont.truetype(FONT_BOLD, hero_size)
     except Exception:
@@ -125,45 +125,54 @@ def build_title_overlay_image(title, dress_type, gradient, workdir, platform="in
         hw, hh = hero_size * len(hero_word) // 2, hero_size
 
     hx = (OUTPUT_W - hw) // 2
-    hy = 30
+    hy = 24
 
-    # Stroke
+    # 1. Draw stroke first (offset in 8 directions)
     stroke_rgb = tuple(int(stroke_color[i:i+2], 16) for i in (1, 3, 5)) + (255,)
-    for dx in range(-5, 6, 2):
-        for dy in range(-5, 6, 2):
+    for dx in range(-4, 5, 2):
+        for dy in range(-4, 5, 2):
             if dx == 0 and dy == 0:
                 continue
             draw.text((hx + dx, hy + dy), hero_word, font=hero_font, fill=stroke_rgb)
 
-    # Gradient simulation — top half color1, bottom half color2
-    c1_rgb = tuple(int(color1[i:i+2], 16) for i in (1, 3, 5)) + (255,)
-    c2_rgb = tuple(int(color2[i:i+2], 16) for i in (1, 3, 5)) + (255,)
+    # 2. True gradient: render on separate layer with gradient mask
+    c1 = tuple(int(color1[i:i+2], 16) for i in (1, 3, 5))
+    c2 = tuple(int(color2[i:i+2], 16) for i in (1, 3, 5))
 
-    # Draw on a separate layer then crop into two halves
-    top_layer = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
-    bot_layer = Image.new("RGBA", (OUTPUT_W, OUTPUT_H), (0, 0, 0, 0))
-    ImageDraw.Draw(top_layer).text((hx, hy), hero_word, font=hero_font, fill=c1_rgb)
-    ImageDraw.Draw(bot_layer).text((hx, hy), hero_word, font=hero_font, fill=c2_rgb)
+    # Create gradient image same size as hero text bounding box
+    grad_img = Image.new("RGBA", (hw + 20, hh + 20), (0, 0, 0, 0))
+    grad_draw = ImageDraw.Draw(grad_img)
 
-    # Mask: top half shows color1, bottom half shows color2
-    mask_top = Image.new("L", (OUTPUT_W, OUTPUT_H), 0)
-    mask_top.paste(255, (0, 0, OUTPUT_W, hy + hh // 2))
-    mask_bot = Image.new("L", (OUTPUT_W, OUTPUT_H), 0)
-    mask_bot.paste(255, (0, hy + hh // 2, OUTPUT_W, hy + hh + 10))
+    # Draw gradient line by line (left to right)
+    for x in range(hw + 20):
+        ratio = x / (hw + 20)
+        r = int(c1[0] + (c2[0] - c1[0]) * ratio)
+        g = int(c1[1] + (c2[1] - c1[1]) * ratio)
+        b = int(c1[2] + (c2[2] - c1[2]) * ratio)
+        grad_draw.line([(x, 0), (x, hh + 20)], fill=(r, g, b, 255))
 
-    img.paste(top_layer, mask=mask_top)
-    img.paste(bot_layer, mask=mask_bot)
-    draw = ImageDraw.Draw(img)  # redraw after paste
+    # Create text mask — white where text is
+    text_mask = Image.new("L", (hw + 20, hh + 20), 0)
+    ImageDraw.Draw(text_mask).text((10, 5), hero_word, font=hero_font, fill=255)
 
-    # ── Draw subtitle — small, single line ──────────────────────────────────
-    sub_y = hy + hh + 14
-    sub_size = 42
-    sub_text = title.replace("👗", "").replace("🌸", "").strip()
+    # Apply gradient through text mask
+    grad_img.putalpha(text_mask)
+    img.paste(grad_img, (hx - 10, hy - 5), grad_img)
+
+    draw = ImageDraw.Draw(img)  # refresh draw after paste
+
+    # ── Subtitle: IG title small, single line, below hero word ──────────────
+    # Use ig_title (passed as title param) — shorter and punchier than yt_title
+    sub_y = hy + hh + 12
+    sub_text = title.replace("👗", "").replace("🌸", "").replace("✨", "").strip()
+    sub_size = 38
+
     try:
         sub_font = ImageFont.truetype(FONT_BOLD, sub_size)
         sb = draw.textbbox((0, 0), sub_text, font=sub_font)
         sw = sb[2] - sb[0]
-        while sw > OUTPUT_W - 40 and sub_size > 26:
+        # Shrink font until it fits in one line
+        while sw > OUTPUT_W - 30 and sub_size > 22:
             sub_size -= 2
             sub_font = ImageFont.truetype(FONT_BOLD, sub_size)
             sb = draw.textbbox((0, 0), sub_text, font=sub_font)
@@ -173,8 +182,11 @@ def build_title_overlay_image(title, dress_type, gradient, workdir, platform="in
         sw = len(sub_text) * 10
 
     sx = (OUTPUT_W - sw) // 2
-    draw.text((sx + 1, sub_y + 1), sub_text, font=sub_font, fill=(0, 0, 0, 200))
-    draw.text((sx, sub_y), sub_text, font=sub_font, fill=(255, 255, 255, 240))
+    # Shadow
+    draw.text((sx + 1, sub_y + 1), sub_text, font=sub_font, fill=(0, 0, 0, 220))
+    # White text
+    draw.text((sx, sub_y), sub_text, font=sub_font, fill=(255, 255, 255, 245))
+
 
 
     title_path = os.path.join(workdir, "title_overlay.png")
